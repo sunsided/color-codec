@@ -12,6 +12,11 @@ only to the lattice points inside the sRGB gamut, has about half of RGB888's err
 left/right bitstream idea, gets the same guarantee at **~19 bits on average** as a
 prefix-free, variable-length code.
 
+Flattening the gamut onto a 2D plane ("unfolding", kernel/manifold embeddings) gives a good
+full-gamut color map. It does **not** give fewer bits: on images every 2D layout needs ~24% more
+bits than plain RGB under the same coder, because a 3D volume can only reach 2D by tearing.
+See [Flattening](#flattening-the-gamut-into-2d-unfolding).
+
 ## Codecs
 
 | Codec | Module | Idea |
@@ -140,6 +145,117 @@ run-length columns and could be packed far tighter.
    two geometries shrinks the gain further.
 7. **Grays are the weak spot** for both new codecs (see above).
 
+## Flattening the gamut into 2D ("unfolding")
+
+**Question.** Can the 3D gamut be unfolded onto a plane like a cube net, so a color becomes two
+coordinates, and does that buy fewer bits, better image compression, or a usable 2D color map?
+
+**Theory first.**
+- A cube's *surface* is 2D, so it unfolds. The gamut is a *volume*, and no continuous injection
+  R³ → R² exists (invariance of domain). Every 2D flattening must tear the volume somewhere.
+- Borsuk–Ulam adds that any continuous map of a sphere-like shell into the plane merges some pair
+  of antipodal colors.
+- Space-filling curves are at best 1/d-Hölder.
+
+**Per-color bits are not the lever.**
+- Quantized, any point set fits any number of coordinates; the lattice rank is already one.
+- A 2D layout of the same lattice points needs exactly the same `log2(N)` bits, so ~20 bits per
+  color at ΔE00 ≤ 1 regardless of shape.
+- What a layout *can* change is locality.
+
+**What was built** (`src/flat/`): bijective layouts of the 20-bit (1024²) and 16-bit (256²) BCC
+lattices. A method gives each point a 2D target position; recursive median bisection then fills
+the grid evenly.
+
+| layout | idea |
+|---|---|
+| raster | rank in row-major order (control) |
+| Morton / Hilbert 3D→2D | sort points along a 3D curve, lay the sequence along the 2D curve |
+| L-slices | 3D-LUT atlas: lightness slabs as tiles, (a, b) inside |
+| Okhsv slices | Ottosson's exact gamut→cylinder; value slabs as tiles, hue/saturation disk inside |
+| shells-octa | onion shells around the gamut's center (the gamut is star-shaped there: 0 points beyond a ray's first exit), each unfolded with the equal-area octahedral map |
+| onion rings | shells as annuli of one disk; elevation alternates direction per shell so neighboring shells meet at the same pole |
+| kernel PCA / Isomap | RBF kernel PCA and landmark Isomap embeddings (1500 landmarks) |
+
+"Mirrored" means every other tile is flipped, so that touching edges of consecutive tiles show
+matching colors. This is the cube-net folding trick.
+
+### Results
+
+**Locality** (`results/flat_layouts.md`): adjacent cells and "near-twin" colors one lattice step
+apart.
+
+| layout (20-bit) | adjacent-cell ΔE00 mean / p99 | visible seams (ΔE00 > 5) | near twins > 4 cells apart |
+|---|---:|---:|---:|
+| raster | 13.5 / 75.7 | 48.9% | 78% |
+| Hilbert 3D→2D | 1.48 / 12.4 | 3.8% | 43% |
+| L-slices 16 | 1.83 / 8.0 | 2.9% | 26% |
+| **L-slices 64 mirrored** | **0.85 / 3.8** | **0.66%** | 35% |
+| Okhsv slices 64 mirrored | 0.98 / 6.0 | 1.3% | 45% |
+| shells-octa 16 mirrored | 1.20 / 8.5 | 2.6% | 39% |
+| onion rings 8 | 2.67 / 18.4 | 13% | 65% |
+
+At 16 bits, trustworthiness / continuity (Venna & Kaski, k = 10):
+
+| 16-bit layout | trustworthiness / continuity |
+|---|---:|
+| L-slices mirrored | 0.998 / 0.955 |
+| Hilbert | 0.984 / 0.959 |
+| kernel PCA | 0.896 / 0.998 |
+| Isomap | 0.907 / 0.997 |
+
+The kernel methods keep color neighbors together (continuity) but pile unrelated colors next to
+each other (trustworthiness). They squash the lightness dimension into speckle, and 67–77% of
+their adjacent cells are visible seams.
+
+**Images** (`results/flat_images.md`): 13 wallpapers at 1024 px wide, quantized to the 20-bit
+lattice (p99 ΔE00 0.2–0.7). Mean bits per pixel:
+
+| encoding of the *same* quantized image | bpp |
+|---|---:|
+| RGB888 → WebP lossless | **3.36** |
+| RGB888 → Paeth + zstd (same coder as the layouts) | 4.80 |
+| 1-D lattice rank → zstd | 5.31 |
+| best 2D layout (Okhsv slices mirrored) → Paeth + zstd | 5.95 |
+| L-slices mirrored → Paeth + zstd | 6.03 |
+| Hilbert 3D→2D → Paeth + zstd | 6.39 |
+| raster → Paeth + zstd | 7.92 |
+
+For reference, the zero-order entropy of the ranks is 7.21 bpp, and the 8-bit originals take
+3.40 bpp in WebP lossless.
+
+**Interpolating codes:** averaging the codes of neighboring pixels gives a color more than ΔE00 2
+off the true blend this often:
+
+| codes averaged | pairs off by ΔE00 > 2 |
+|---|---:|
+| RGB888 | 0% |
+| Hilbert 3D→2D | 41% |
+| L-slices | 46% |
+| onion rings | 70% |
+
+### Verdict
+
+1. **Fewer bits: no.** The per-color budget is set by how many colors must be distinguished, not
+   by how many coordinates carry them. On images, every 2D layout costs **24% more** bits than plain
+   RGB888 under the same coder, and more than the 1-D rank.
+2. **Why RGB wins on images: continuity beats coordinate count.** Natural images vary smoothly,
+   and RGB, like any continuous 3-coordinate system, keeps gradients smooth in every channel. A 2D
+   layout must tear, and each tear a gradient crosses becomes an expensive residual. Squeezing
+   out a dimension trades one coordinate for many discontinuities.
+3. **Maps: yes, and folding helps.** The mirrored L-slice atlas is a genuinely good 2D map of the
+   whole gamut. Each of the 2²⁰ in-gamut lattice colors appears exactly once, and only 0.66% of
+   adjacent cells form a visible seam. Mirroring cut the p99 seam in the 16-bit map from 43 to
+   9.9 ΔE00. See `results/maps/` (256² renders) and the overviews
+   `results/maps/overview-tiled.png` and `results/maps/overview-curves-rings-kernel.png`.
+4. **Kernel and manifold methods can't flatten a solid.** They recover hue and chroma and crush
+   lightness, exactly as invariance of domain predicts.
+5. **Interpolation needs continuity.** Even the best layouts give a wrong blend for 40–70% of
+   pairs, so filtering and blending must happen after decoding.
+
+Run with `cargo run --release --bin flat -- {layouts|images}`. The image set is whatever is in
+`/usr/share/backgrounds`; WebP numbers need ImageMagick with libwebp.
+
 ## Prior art
 
 - **Fibonacci-lattice color quantization**, Mojsilović & Soljanin (SPIE 2000, IEEE TIP 2001): a
@@ -186,6 +302,9 @@ src/codecs/kd.rs        perceptual binary partition (fixed / variable length, st
 src/codecs/lattice.rs   gamut-ranked cubic / BCC lattices with exact cubic-root columns
 src/data.rs             seeded test color sets
 src/stats.rs            summaries, parallel evaluation
+src/flat/               2D layouts ("unfolding"): Hilbert/Morton, slice atlases, Okhsv, octahedral
+                        shells, onion rings, kernel PCA / Isomap, locality metrics, plane coding
 src/bin/study.rs        codec experiments; writes markdown and results/fixed.csv
+src/bin/flat.rs         flattening experiments; writes results/flat_*.md and results/maps/
 examples/gamut_fraction.rs  in-gamut share of the Oklab bounding box
 ```

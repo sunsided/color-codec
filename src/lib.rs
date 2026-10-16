@@ -15,5 +15,6 @@ pub mod code;
 pub mod codecs;
 pub mod color;
 pub mod data;
+pub mod flat;
 pub mod metric;
 pub mod stats;
