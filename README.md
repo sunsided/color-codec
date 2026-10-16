@@ -290,7 +290,7 @@ numbers and the figure labels need ImageMagick (with libwebp for the former).
   1991), plus median cut, octree, Wu and Orchard–Bouman for palettes. All of these adapt to an
   image. I found no fixed, Oklab-guided k-d partition of the whole sRGB gamut used as a progressive
   universal color code, which is absence of evidence and not proof.
-- **Tree-VQ** (arXiv:2609.03641, September 2026): progressive, prefix-decodable trees over learned
+- **Tree-VQ** (Ma et al., arXiv:2609.03641, September 2026): progressive, prefix-decodable trees over learned
   image tokens rather than single colors.
 - **JNDs:** ITU-R BT.2124 (ΔE_ITP = 1 ≈ JND); Dolby's PQ and ICtCp bit-depth work (10-bit ICtCp ≈
   11.5-bit YCbCr); Björn Ottosson's Oklab and color picker posts (the `L_r` toe and Okhsv).
