@@ -1,5 +1,9 @@
 # color-codec
 
+[![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE-EUPL)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE-APACHE)
+
 This started with a hunch I couldn't shake: that an RGB color can be written down with two
 coordinates instead of three, if one is only clever enough about it. Anchor a spiral in the color
 wheel, let one number pick where on the spiral you are and the other one the lightness, and you're
@@ -332,5 +336,10 @@ src/bin/flat.rs         flattening experiments; writes results/flat_*.md and res
 examples/               in-gamut share of the Oklab box, BCC vs. cubic comparison
 docs/images/            README figures (`flat -- maps`)
 ```
+
+## License
+
+Licensed under either of [European Union Public License, Version 1.2](LICENSE-EUPL), [Apache License, Version 2.0](LICENSE-APACHE) or
+[MIT license](LICENSE-MIT) at your option.
 
 Thanks for making it down here. Have fun, and stay curious!
