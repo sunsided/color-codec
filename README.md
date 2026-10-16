@@ -4,24 +4,28 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE-APACHE)
 
+Experiments in encoding a single sRGB color in as few bits as possible, as long as it still looks
+the same.
+
+This is a research toy, so don't expect a codec to depend on here: `f64` reference
+implementations, no stable API, not on crates.io. Every number below comes from the experiments in
+this repository and can be regenerated with the commands given along the way.
+
+## How this started
+
 This started with a hunch I couldn't shake: that an RGB color can be written down with two
 coordinates instead of three, if one is only clever enough about it. Anchor a spiral in the color
-wheel, let one number pick where on the spiral you are and the other one the lightness, and you're
-done. I talked it through with ChatGPT first, which agreed enthusiastically, wrote a spiral codec
-and declared victory. Then the numbers came in, and the spiral lost to plain Oklab quantization at
-every single bit rate.
+wheel, let one number pick the position on the spiral and the other one the lightness, and you're
+done. I talked it through with ChatGPT first, which agreed, wrote a spiral codec and declared
+victory. Measured properly, the spiral then lost to plain Oklab quantization at every bit rate I
+tested (16 to 32 bits).
 
 So I tried something else: a bitstream in which every bit says "left" or "right", carving up the
-gamut one binary decision at a time. That worked noticeably better, and on the way it produced a
-third design that beats both: a lattice in Oklab that only hands out codes to colors that actually
-exist in sRGB. And because I still wasn't done with the two-coordinates thing, I also tried to
-unfold the 3D gamut onto a plane like a cube net. That part ends in a theorem and a 24% penalty,
-but it produced some rather pretty maps along the way.
-
-This crate is the resulting pile of codecs, experiments and measurements, written in Rust with
-`f64` reference code throughout. Don't expect a production codec here; it is a research toy that
-tries to answer "how few bits does a single color need if 'looks the same' is good enough?"
-honestly.
+gamut one binary decision at a time. That worked better, and on the way it led to a third design
+that beats both: a lattice in Oklab that only hands out codes to colors that actually exist in
+sRGB. And because I still wasn't done with the two-coordinates thing, I also tried to unfold the 3D
+gamut onto a plane like a cube net. That part ends in a theorem and a penalty of at least 24% on
+real images, but it produced some rather pretty maps along the way.
 
 <p align="center">
   <img src="docs/images/gamut-atlas-1024.png" width="512" alt="All colors of the 20-bit lattice on a 1024 by 1024 grid, as 64 mirrored lightness slices">
@@ -29,14 +33,14 @@ honestly.
 
 *Every color the 20-bit lattice can encode, exactly once: 1,048,089 of them on a 1024×1024 grid,
 unfolded as 64 mirrored lightness slices that snake from black (top left) to white (bottom left).
-The horizontal lines are the tears the math insists on.*
+The horizontal lines are where this layout tears; some tear is unavoidable, as shown further down.*
 
 TL;DR: A BCC lattice in lightness-weighted Oklab, with codes for in-gamut points only, has about
 half of RGB888's error at the same 24 bits (p99 ΔE00 0.22 vs 0.45; worst case 0.34 vs 0.93).
 Keeping every color within ΔE00 ≤ 1, which is about one just-noticeable difference, takes 20 bits
 instead of RGB's 24. The left/right tree gets the same guarantee at about 19 bits on average as a
-prefix-free, variable-length code. Flattening the gamut to two coordinates gives a nice map of all
-colors, but costs about 24% more bits on real images than plain RGB.
+prefix-free, variable-length code. Flattening the gamut to two coordinates gives a usable map of
+all colors, but costs at least 24% more bits on real images than plain RGB.
 
 ## What's in the box
 
@@ -53,8 +57,8 @@ colors, but costs about 24% more bits on real images than plain RGB.
 The sRGB gamut is exactly the unit cube in RGB, so a tree that cuts the cube never wastes a code
 on an impossible color. Oklab is much less tidy: only 20.8% of the gamut's Oklab bounding box is
 actually inside the gamut (`cargo run --release --example gamut_fraction`), which means a plain
-Oklab grid throws away 2.27 bits on every single color. The tree therefore lives in RGB, but takes
-the *positions* of its cuts from perceptual geometry:
+Oklab grid throws away 2.27 bits on every color. The tree therefore lives in RGB, but takes the
+*positions* of its cuts from perceptual geometry:
 
 - `Midpoint` cuts the axis whose longest edge has the longest Oklab chord, at the RGB midpoint.
 - `Balanced` uses the same axis, but cuts where that edge's Oklab chord is halved.
@@ -69,10 +73,10 @@ decodable from a concatenated stream (`decode_stream`).
 
 The lattice keeps the useful half of each earlier idea: like the tree it spends no codes outside
 the gamut, and like Oklab quantization its cells are compact and roughly round in a perceptual
-space. Finding the in-gamut points exactly turned out to be pleasantly cheap. Along a line of
-constant `L` and `a`, every linear RGB channel is a cubic polynomial in `b`, so the in-gamut part of
-each lattice column is a union of intervals between polynomial roots. That also covers the blue
-hues that leave the gamut and come back in again, the very case that broke the adaptive spiral.
+space. The in-gamut points are found exactly, without sampling. Along a line of constant `L` and
+`a`, every linear RGB channel is a cubic polynomial in `b`, so the in-gamut part of each lattice
+column is a union of intervals between polynomial roots. That also covers the blue hues that
+leave the gamut and come back in again, the case that broke the adaptive spiral.
 
 BCC (body-centered cubic) is the best covering lattice in 3D: for a given number of points, it has
 the smallest worst-case distance to the nearest one. Weighting `L` by `w = 0.4`, i.e. making
@@ -83,9 +87,9 @@ lightness coarser, matches CIEDE2000 better than raw Oklab does.
 CIEDE2000 (ΔE00) is the main score; the implementation passes the reference pairs from Sharma, Wu
 and Dalal. The original ChatGPT conversation measured everything as Euclidean distance in Oklab
 against the often-quoted "ΔE_OK ≈ 0.02 is a just-noticeable difference", but there doesn't seem to
-be a single peer-reviewed source for that number, so Oklab is used as a geometry here and not as a
-threshold. ΔE00 ≈ 1 is the
-conventional JND, with measured perceptibility thresholds somewhere around 0.8 to 1.7.
+be a peer-reviewed source for that number, so Oklab is used as a geometry here and not as a
+threshold. ΔE00 ≈ 1 is the conventional JND, with measured perceptibility thresholds somewhere
+around 0.8 to 1.7.
 
 Each test set has 100,000 colors with a fixed seed: uniform in sRGB; uniform in the Oklab volume
 within the gamut; dark colors (`L < 0.3`); the gamut surface (one channel at 0 or 1); and grays.
@@ -107,9 +111,9 @@ To keep the baselines honest, RGB, Oklab-grid and spiral bit splits are picked p
 
 All five test sets are in `results/fixed.md`; uniform-sRGB, dark and surface colors give the same
 ranking. Grays are the exception. RGB keeps grays exactly neutral, while the tree and the lattice
-put gray inputs into cells whose centers carry a little bit of chroma, and ΔE00 is very touchy
-about chroma near neutral. At 24 bits, the gray p99 is 0.18 for RGB, 0.18 for the BCC lattice and
-0.67 for the tree.
+put gray inputs into cells whose centers carry a little chroma, and ΔE00 is rather touchy about
+chroma near neutral. At 24 bits, the gray p99 is 0.18 for RGB, 0.18 for the BCC lattice and 0.67 for
+the tree.
 
 ### Bits needed to guarantee a worst case (observed over 100k colors)
 
@@ -133,8 +137,8 @@ target.
 
 Every extra bit shrinks the cell, but about 28% of single-bit refinements move the reconstruction
 slightly *away* from the true color. Only the uncertainty bound shrinks monotonically. That is a
-property of midpoint reconstruction in general and not a bug of this particular tree. (The
-ChatGPT experiments had seen the same thing, at about 25%.)
+property of midpoint reconstruction in general and not a bug of this particular tree; the ChatGPT
+experiments had seen the same thing, at about 25%.
 
 ### Speed (single thread, unoptimized)
 
@@ -152,26 +156,27 @@ run-length columns and could be packed far tighter.
 ## Things that didn't work (and a few that did)
 
 The spiral was the original idea, and it does work in the sense that two numbers can describe
-every color. It is just worse than plain Oklab quantization at every bit rate, which in hindsight
-makes sense: two coordinates were never the constraint, bits are, and any finite code is a single
-integer anyway. What actually matters, in that order, is not wasting codes on impossible colors
+every color. It is worse than plain Oklab quantization at every bit rate tested, which in
+hindsight makes sense: two coordinates were never the constraint, bits are, and any finite code is
+a single integer anyway. What matters, in that order, is not wasting codes on impossible colors
 (the Oklab grid spends 79% of its codes outside the gamut) and getting the shape of the cells
 right. The tree's cuts are aligned with the RGB axes, which sit at an angle to the perceptual
 ones, so its cells come out sheared in Oklab. Reweighting the tree's geometry didn't close that
 gap.
 
-Oklab's behavior near black looked like the next suspect, since its cube root has an infinite
-slope at zero. Ottosson's `L_r` toe and CIELAB both seemed like obvious fixes for the tree's split
+Oklab's behavior near black looked like the next suspect, since its cube root has an infinite slope
+at zero. Ottosson's `L_r` toe and CIELAB both seemed like obvious fixes for the tree's split
 geometry, and both made things *worse* under ΔE00, dark colors included
-(`results/fixed_geometries.md`). What did help was the opposite direction: raw Oklab over-weights
-lightness compared to CIEDE2000, and the lattice improves steadily from `w = 1` down to
-`w ≈ 0.4` (`results/lattice_sweep.md`).
+(`results/fixed_geometries.md`). Well, well. What did help was the opposite direction: raw Oklab
+over-weights lightness compared to CIEDE2000, and the lattice improves steadily from `w = 1` down
+to `w ≈ 0.4` (`results/lattice_sweep.md`).
 
-Finally, BCC beats the plain cubic lattice by less than theory promises. Under ΔE_OK at `w = 1`,
-it lowers the p99 by about 13% but the maximum by only 3 to 9%, far from the 23% the covering
-radius predicts (`cargo run --release --example bcc_vs_cubic`). Colors at the gamut boundary set
-the maximum, because their nearest *in-gamut* point is farther away than the lattice spacing
-suggests.
+Finally, BCC beats the plain cubic lattice by less than theory promises. With covering
+thicknesses of 1.4635 (BCC) and 2.7207 (cubic), the covering radius at equal point density should
+drop by about 19%. Under ΔE_OK at `w = 1`, the measured p99 drops by about 13% and the maximum by
+only 3 to 9% (`cargo run --release --example bcc_vs_cubic`). The likely reason, not yet verified,
+is the gamut boundary: the maximum is set by colors near it, whose nearest *in-gamut* point is
+farther away than the lattice spacing suggests.
 
 ## Two coordinates, revisited: unfolding the gamut
 
@@ -179,13 +184,13 @@ Having made peace with bits being the real currency, I still wanted to know whet
 be unfolded onto a plane like a cube net, and whether that would buy anything: fewer bits, better
 image compression, or at least a good 2D map of all colors.
 
-The math is rather clear on the first point. A cube's *surface* is 2D, so it unfolds; the gamut is
-a *volume*, and there is no continuous one-to-one map from R³ into R² (invariance of domain).
-Every flattening has to tear the volume somewhere, Borsuk–Ulam guarantees that any continuous map
-of a sphere-like shell into the plane merges some pair of opposite colors, and space-filling
-curves are at best 1/d-Hölder. Quantized, any set of points fits any number of coordinates (the
-lattice rank already is a single one), so a 2D layout of the same lattice needs exactly the same
-`log2(N)` bits. What a layout *can* change is locality, and that is what the experiments measure.
+The math is clear on the first point. A cube's *surface* is 2D, so it unfolds; the gamut is a
+*volume*, and there is no continuous one-to-one map from R³ into R² (invariance of domain). Every
+flattening has to tear the volume somewhere, Borsuk–Ulam guarantees that any continuous map of a
+sphere-like shell into the plane merges some pair of opposite colors, and space-filling curves are
+at best 1/d-Hölder. Quantized, any set of points fits any number of coordinates (the lattice rank
+already is a single one), so a 2D layout of the same lattice needs exactly the same `log2(N)` bits.
+What a layout *can* change is locality, and that is what the experiments measure.
 
 `src/flat/` builds bijective layouts of the 20-bit (1024²) and 16-bit (256²) BCC lattices. Each
 method gives every point a 2D target position, and recursive median bisection then fills the grid
@@ -197,14 +202,14 @@ evenly.
 | Morton / Hilbert 3D→2D | sort points along a 3D curve, lay the sequence along the 2D curve |
 | L-slices | 3D-LUT style atlas: lightness slabs as tiles, (a, b) inside |
 | Okhsv slices | Ottosson's exact gamut-to-cylinder mapping; value slabs as tiles, hue/saturation disk inside |
-| shells-octa | onion shells around the gamut's center, each unfolded with the equal-area octahedral map |
+| shells-octa | onion shells around the gamut's centroid, each unfolded with the equal-area octahedral map |
 | onion rings | shells as annuli of one disk; elevation alternates direction per shell so neighboring shells meet at the same pole |
 | kernel PCA / Isomap | RBF kernel PCA and landmark Isomap embeddings (1500 landmarks) |
 
 "Mirrored" means every other tile is flipped, so that touching edges of consecutive tiles show
-matching colors, which is exactly the trick that makes a cube net fold back together. The gamut is
-star-shaped around its center, by the way: not a single lattice point lies beyond the first gamut
-exit of its ray, so the onion shells are well defined.
+matching colors, which is the trick that makes a cube net fold back together. The onion shells are
+well defined because the gamut is star-shaped around the Oklab centroid of the lattice points: not
+a single point lies beyond the first gamut exit of its ray.
 
 Here is the 18-bit lattice cut into 16 lightness slices, once as a plain atlas and once mirrored.
 On the right, neighboring tiles meet at matching colors along their vertical edges. The horizontal
@@ -239,9 +244,11 @@ invariance of domain predicts, though it is still something to see it happen:
 
 ![The other nets at 16 bits: Hilbert, Okhsv slices, octahedral shells, onion rings, kernel PCA and Isomap](docs/images/nets.png)
 
-Hilbert's blocks are the curve's recursion showing through; the octahedral shells come out as a
-grid of pinwheels, one per shell; and the onion rings would be quite lovely if it weren't for the
-dark seams where each shell turns around at its pole.
+Hilbert's blocks are the curve's recursion showing through, and the octahedral shells come out as
+a grid of pinwheels, one per shell. The onion rings would be rather lovely if it weren't for the
+poles: consecutive shells do meet continuously at their shared pole, but the dark, noisy bands are
+the dark pole of every other shell, smeared around the full circle because azimuth is undefined
+there. That smearing is where this layout tears.
 
 ### Images
 
@@ -267,18 +274,19 @@ L-slices and 70% with the onion rings.
 ### Verdict
 
 Flattening doesn't buy fewer bits. The per-color budget is set by how many colors need to be told
-apart, not by how many coordinates carry them, and on images every 2D layout costs about 24% more
-than plain RGB888 under the same coder. The reason is continuity: natural images vary smoothly,
-and RGB, like any continuous three-coordinate system, keeps gradients smooth in every channel. A 2D
-layout has to tear, and every tear a gradient crosses turns into an expensive residual. Squeezing
-out a dimension trades one coordinate for a lot of discontinuities.
+apart, not by how many coordinates carry them, and on images every 2D layout costs at least 24%
+more than plain RGB888 under the same coder. The reason is continuity: natural images vary
+smoothly, and RGB, like any continuous three-coordinate system, keeps gradients smooth in every
+channel. A 2D layout has to tear, and every tear a gradient crosses turns into an expensive
+residual. Squeezing out a dimension trades one coordinate for a lot of discontinuities.
 
-The maps, on the other hand, are genuinely nice. The mirrored L-slice atlas shows every one of the
-2²⁰ in-gamut lattice colors exactly once, with visible seams on only 0.66% of adjacent cells, and
-mirroring alone cut the worst seams of the 16-bit map from ΔE00 43 to 9.9. All 256² renders are
-in `results/maps/`. Run the experiments with `cargo run --release --bin flat -- {layouts|images}`,
-and regenerate the figures in this README with `cargo run --release --bin flat -- maps`; the WebP
-numbers and the figure labels need ImageMagick (with libwebp for the former).
+The maps, on the other hand, turned out genuinely useful (and rather pretty). The mirrored L-slice
+atlas shows every one of the 1,048,089 in-gamut lattice colors exactly once, with visible seams on
+only 0.66% of adjacent cells, and mirroring alone cut the p99 seam of the 16-bit map from ΔE00 43
+to 9.9. All 256² renders are in `results/maps/`. Run the experiments with `cargo run --release
+--bin flat -- {layouts|images}`, and regenerate the figures in this README with `cargo run
+--release --bin flat -- maps`; the WebP numbers and the figure labels need ImageMagick (with
+libwebp for the former).
 
 ## Prior art
 
@@ -290,8 +298,8 @@ numbers and the figure labels need ImageMagick (with libwebp for the former).
   1991), plus median cut, octree, Wu and Orchard–Bouman for palettes. All of these adapt to an
   image. I found no fixed, Oklab-guided k-d partition of the whole sRGB gamut used as a progressive
   universal color code, which is absence of evidence and not proof.
-- **Tree-VQ** (Ma et al., arXiv:2609.03641, September 2026): progressive, prefix-decodable trees over learned
-  image tokens rather than single colors.
+- **Tree-VQ** (Ma et al., arXiv:2609.03641, September 2026): progressive, prefix-decodable trees
+  over learned image tokens rather than single colors.
 - **JNDs:** ITU-R BT.2124 (ΔE_ITP = 1 ≈ JND); Dolby's PQ and ICtCp bit-depth work (10-bit ICtCp ≈
   11.5-bit YCbCr); Björn Ottosson's Oklab and color picker posts (the `L_r` toe and Okhsv).
 - **Unfolding:** octahedral normal encoding (Cigolle et al., JCGT 2014), equal-area octahedral
@@ -339,7 +347,7 @@ docs/images/            README figures (`flat -- maps`)
 
 ## License
 
-Licensed under either of [European Union Public License, Version 1.2](LICENSE-EUPL), [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under either of [European Union Public License, Version 1.2](LICENSE-EUPL),
+[Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT) at your option.
 
-Thanks for making it down here. Have fun, and stay curious!
+Have fun, take care!
