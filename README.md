@@ -19,6 +19,14 @@ This crate is the resulting pile of codecs, experiments and measurements, writte
 tries to answer "how few bits does a single color need if 'looks the same' is good enough?"
 honestly.
 
+<p align="center">
+  <img src="docs/images/gamut-atlas-1024.png" width="512" alt="All colors of the 20-bit lattice on a 1024 by 1024 grid, as 64 mirrored lightness slices">
+</p>
+
+*Every color the 20-bit lattice can encode, exactly once: 1,048,089 of them on a 1024×1024 grid,
+unfolded as 64 mirrored lightness slices that snake from black (top left) to white (bottom left).
+The horizontal lines are the tears the math insists on.*
+
 TL;DR: A BCC lattice in lightness-weighted Oklab, with codes for in-gamut points only, has about
 half of RGB888's error at the same 24 bits (p99 ΔE00 0.22 vs 0.45; worst case 0.34 vs 0.93).
 Keeping every color within ΔE00 ≤ 1, which is about one just-noticeable difference, takes 20 bits
@@ -194,6 +202,13 @@ matching colors, which is exactly the trick that makes a cube net fold back toge
 star-shaped around its center, by the way: not a single lattice point lies beyond the first gamut
 exit of its ray, so the onion shells are well defined.
 
+Here is the 18-bit lattice cut into 16 lightness slices, once as a plain atlas and once mirrored.
+On the right, neighboring tiles meet at matching colors along their vertical edges. The horizontal
+edges between rows still tear, because the tile below is several slabs further along in lightness;
+mirroring can hide some seams, but not all of them.
+
+![16 lightness slices, plain and mirrored](docs/images/mirroring.png)
+
 ### Locality
 
 | layout (20-bit) | adjacent-cell ΔE00 mean / p99 | visible seams (ΔE00 > 5) | near twins > 4 cells apart |
@@ -216,7 +231,13 @@ exit of its ray, so the onion shells are well defined.
 "Near twins" are two colors one lattice step apart. The kernel methods keep color neighbors
 together but pile unrelated colors next to each other: they recover hue and chroma and crush
 lightness into speckle, and 67 to 77% of their adjacent cells are visible seams. Exactly what
-invariance of domain predicts, though it is still something to see it happen.
+invariance of domain predicts, though it is still something to see it happen:
+
+![The other nets at 16 bits: Hilbert, Okhsv slices, octahedral shells, onion rings, kernel PCA and Isomap](docs/images/nets.png)
+
+Hilbert's blocks are the curve's recursion showing through; the octahedral shells come out as a
+grid of pinwheels, one per shell; and the onion rings would be quite lovely if it weren't for the
+dark seams where each shell turns around at its pole.
 
 ### Images
 
@@ -250,11 +271,10 @@ out a dimension trades one coordinate for a lot of discontinuities.
 
 The maps, on the other hand, are genuinely nice. The mirrored L-slice atlas shows every one of the
 2²⁰ in-gamut lattice colors exactly once, with visible seams on only 0.66% of adjacent cells, and
-mirroring alone cut the worst seams of the 16-bit map from ΔE00 43 to 9.9. The renders are in
-`results/maps/`, with two overview sheets (`overview-tiled.png` and
-`overview-curves-rings-kernel.png`). Run the experiments with
-`cargo run --release --bin flat -- {layouts|images}`; the WebP numbers need ImageMagick with
-libwebp.
+mirroring alone cut the worst seams of the 16-bit map from ΔE00 43 to 9.9. All 256² renders are
+in `results/maps/`. Run the experiments with `cargo run --release --bin flat -- {layouts|images}`,
+and regenerate the figures in this README with `cargo run --release --bin flat -- maps`; the WebP
+numbers and the figure labels need ImageMagick (with libwebp for the former).
 
 ## Prior art
 
@@ -310,6 +330,7 @@ src/flat/               2D layouts: Hilbert/Morton, slice atlases, Okhsv, octahe
 src/bin/study.rs        codec experiments; writes markdown and results/fixed.csv
 src/bin/flat.rs         flattening experiments; writes results/flat_*.md and results/maps/
 examples/               in-gamut share of the Oklab box, BCC vs. cubic comparison
+docs/images/            README figures (`flat -- maps`)
 ```
 
 Thanks for making it down here. Have fun, and stay curious!

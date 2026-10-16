@@ -1,5 +1,6 @@
-//! Flattening experiments. Usage: `cargo run --release --bin flat -- <layouts|images|all>`.
-//! Markdown goes to stdout; maps are written to `results/maps/`.
+//! Flattening experiments. Usage: `cargo run --release --bin flat -- <layouts|images|maps|all>`.
+//! Markdown goes to stdout; maps are written to `results/maps/`, README figures (`maps`) to
+//! `docs/images/`.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -256,12 +257,71 @@ fn images() {
     println!();
 }
 
+/// Run ImageMagick `montage` over labeled images.
+fn montage(items: &[(String, PathBuf)], tile: &str, out: &Path) {
+    let mut cmd = Command::new("montage");
+    cmd.args(["-background", "white", "-fill", "#222222", "-depth", "8"])
+        .args(["-font", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "-pointsize", "16"]);
+    for (label, path) in items {
+        cmd.arg("-label").arg(label).arg(path);
+    }
+    let ok = cmd.args(["-tile", tile, "-geometry", "+10+10"]).arg(out).status().expect("ImageMagick montage");
+    assert!(ok.success());
+}
+
+/// Figures for the README, written to `docs/images/`.
+fn maps() {
+    let out = PathBuf::from("docs/images");
+    let tmp = PathBuf::from("target/flat_tmp");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // The best map: every 20-bit lattice color exactly once, 1024×1024.
+    let lat = GamutLattice::new(LatticeKind::Bcc, 0.4, 20);
+    let pts = Points::of(&lat);
+    flat::slice_atlas(&pts, 20, 64, true).render(&pts).save(out.join("gamut-atlas-1024.png")).unwrap();
+
+    // What mirroring does, at 512×512.
+    let lat = GamutLattice::new(LatticeKind::Bcc, 0.4, 18);
+    let pts = Points::of(&lat);
+    let mut items = Vec::new();
+    for (mirror, label) in [(false, "16 lightness slices"), (true, "16 lightness slices, mirrored")] {
+        let path = tmp.join(format!("mirror-{mirror}.png"));
+        flat::slice_atlas(&pts, 18, 16, mirror).render(&pts).save(&path).unwrap();
+        items.push((label.to_string(), path));
+    }
+    montage(&items, "2x1", &out.join("mirroring.png"));
+
+    // The other nets, at 256×256.
+    let lat = GamutLattice::new(LatticeKind::Bcc, 0.4, 16);
+    let pts = Points::of(&lat);
+    let polar = Polar::of(&pts, mean_center(&pts));
+    let nets: [(&str, Layout); 6] = [
+        ("Hilbert 3D→2D", flat::curve(&lat, &pts, 16, true)),
+        ("Okhsv slices, mirrored", flat::okhsv_atlas(&pts, 16, 16, true)),
+        ("octahedral shells", flat::shells_octa(&polar, 16, 16, true)),
+        ("onion rings", flat::onion_rings(&polar, 16, 8, 0)),
+        ("kernel PCA", embed::kernel_pca(&lat, &pts, 16, 1500)),
+        ("Isomap", embed::isomap(&lat, &pts, 16, 1500, 10)),
+    ];
+    let items: Vec<(String, PathBuf)> = nets
+        .iter()
+        .map(|(label, l)| {
+            let path = tmp.join(format!("{}.png", slug(label)));
+            l.render(&pts).save(&path).unwrap();
+            (label.to_string(), path)
+        })
+        .collect();
+    montage(&items, "3x2", &out.join("nets.png"));
+}
+
 fn main() {
     let which = std::env::args().nth(1).unwrap_or_else(|| "all".into());
     let t = Instant::now();
     match which.as_str() {
         "layouts" => layouts(),
         "images" => images(),
+        "maps" => maps(),
         "all" => {
             layouts();
             images();
