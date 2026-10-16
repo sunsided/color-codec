@@ -4,21 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE-APACHE)
 
-Experiments in encoding a single sRGB color in as few bits as possible, as long as it still looks
-the same.
-
-This is a research toy, so don't expect a codec to depend on here: `f64` reference
-implementations, no stable API, not on crates.io. Every number below comes from the experiments in
-this repository and can be regenerated with the commands given along the way.
-
-## How this started
-
-This started with a hunch I couldn't shake: that an RGB color can be written down with two
-coordinates instead of three, if one is only clever enough about it. Anchor a spiral in the color
-wheel, let one number pick the position on the spiral and the other one the lightness, and you're
-done. I talked it through with ChatGPT first, which agreed, wrote a spiral codec and declared
-victory. Measured properly, the spiral then lost to plain Oklab quantization at every bit rate I
-tested (16 to 32 bits).
+This started with a hunch I couldn't (or rather: don't want to) shake: that an RGB color can be
+written down with two coordinates instead of three, if one is only clever enough about it. Anchor a
+spiral in the color wheel, let one number pick the position on the spiral and the other one the
+lightness, and you're done. I talked it through with ChatGPT first, which agreed, wrote a spiral
+codec and declared victory. Measured properly, the spiral then lost to plain Oklab quantization at
+every bit rate I tested (16 to 32 bits).
 
 So I tried something else: a bitstream in which every bit says "left" or "right", carving up the
 gamut one binary decision at a time. That worked better, and on the way it led to a third design
@@ -26,6 +17,11 @@ that beats both: a lattice in Oklab that only hands out codes to colors that act
 sRGB. And because I still wasn't done with the two-coordinates thing, I also tried to unfold the 3D
 gamut onto a plane like a cube net. That part ends in a theorem and a penalty of at least 24% on
 real images, but it produced some rather pretty maps along the way.
+
+What's left is this pile of codecs, experiments and measurements in Rust: `f64` reference code, no
+stable API, not on crates.io, so don't expect anything production-grade here. Every number below
+comes from the experiments in this repository and can be regenerated with the commands given along
+the way.
 
 <p align="center">
   <img src="docs/images/gamut-atlas-1024.png" width="512" alt="All colors of the 20-bit lattice on a 1024 by 1024 grid, as 64 mirrored lightness slices">
@@ -87,14 +83,14 @@ lightness coarser, matches CIEDE2000 better than raw Oklab does.
 CIEDE2000 (ΔE00) is the main score; the implementation passes the reference pairs from Sharma, Wu
 and Dalal. The original ChatGPT conversation measured everything as Euclidean distance in Oklab
 against the often-quoted "ΔE_OK ≈ 0.02 is a just-noticeable difference", but there doesn't seem to
-be a peer-reviewed source for that number, so Oklab is used as a geometry here and not as a
+be a peer-reviewed source for that number, so I use Oklab as a geometry here and not as a
 threshold. ΔE00 ≈ 1 is the conventional JND, with measured perceptibility thresholds somewhere
 around 0.8 to 1.7.
 
 Each test set has 100,000 colors with a fixed seed: uniform in sRGB; uniform in the Oklab volume
 within the gamut; dark colors (`L < 0.3`); the gamut surface (one channel at 0 or 1); and grays.
-To keep the baselines honest, RGB, Oklab-grid and spiral bit splits are picked per budget by p99
-ΔE00 on a separate calibration set. Results live in `results/` and can be regenerated with
+To keep the baselines honest, I picked the RGB, Oklab-grid and spiral bit splits per budget by
+p99 ΔE00 on a separate calibration set. Results live in `results/` and can be regenerated with
 `cargo run --release --bin study -- {fixed|var|prog|speed|lattice}`.
 
 ## Results
@@ -283,10 +279,10 @@ residual. Squeezing out a dimension trades one coordinate for a lot of discontin
 The maps, on the other hand, turned out genuinely useful (and rather pretty). The mirrored L-slice
 atlas shows every one of the 1,048,089 in-gamut lattice colors exactly once, with visible seams on
 only 0.66% of adjacent cells, and mirroring alone cut the p99 seam of the 16-bit map from ΔE00 43
-to 9.9. All 256² renders are in `results/maps/`. Run the experiments with `cargo run --release
---bin flat -- {layouts|images}`, and regenerate the figures in this README with `cargo run
---release --bin flat -- maps`; the WebP numbers and the figure labels need ImageMagick (with
-libwebp for the former).
+to 9.9. All 256² renders are in `results/maps/`. The experiments run with
+`cargo run --release --bin flat -- {layouts|images}`, and the figures in this README come from
+`cargo run --release --bin flat -- maps`; the WebP numbers and the figure labels need ImageMagick
+(with libwebp for the former).
 
 ## Prior art
 
@@ -312,7 +308,7 @@ libwebp for the former).
 - ΔE00 stands in for perception. No viewing study was run.
 - "Bits needed" counts are observed maxima over 100k samples, not proofs. The tree's corner-radius
   bound is an estimate too, though it held in every sample.
-- `w = 0.4` was tuned once, at 20 bits, on the evaluation seed. The margins it produces are much
+- I tuned `w = 0.4` once, at 20 bits, on the evaluation seed. The margins it produces are much
   larger than its sensitivity, but a clean held-out tuning is still on the list.
 
 ## What's next
